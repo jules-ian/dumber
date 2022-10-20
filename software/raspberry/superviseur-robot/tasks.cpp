@@ -91,6 +91,18 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_mutex_create(&mutex_arena, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_mutex_create(&mutex_capture_arena, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_mutex_create(&mutex_accept_arena, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Mutexes created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -113,6 +125,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_sem_create(&sem_camera, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_sem_create(&sem_arena, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -363,6 +379,20 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             open_camera = false;
             rt_mutex_release(&mutex_camera);
             rt_sem_v(&sem_camera);
+        } else if (msgRcv->CompareID(MESSAGE_CAM_ASK_ARENA)) {
+            rt_mutex_acquire(&mutex_capture_arena, TM_INFINITE);
+            capture_arena = true;
+            rt_mutex_release(&mutex_capture_arena);
+        } else if (msgRcv->CompareID(MESSAGE_CAM_ARENA_CONFIRM)) {
+            rt_mutex_acquire(&mutex_capture_arena, TM_INFINITE);
+            accept_arena = true;
+            rt_mutex_release(&mutex_capture_arena);
+            rt_sem_v(&sem_arena);
+        } else if (msgRcv->CompareID(MESSAGE_CAM_ARENA_INFIRM)) {
+            rt_mutex_acquire(&mutex_accept_arena, TM_INFINITE);
+            accept_arena = false;
+            rt_mutex_release(&mutex_accept_arena);
+            rt_sem_v(&sem_arena);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_LEFT) ||
@@ -606,8 +636,11 @@ void Tasks::openCamera(void *arg){
 */
 void Tasks::sendImage(void *arg){
     Img* image;
+    Arena* arena_loc;
     int err;
     bool cam_open = false;
+    bool capt_arena = false;
+    bool valid_arena = false;
 
 
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
@@ -618,16 +651,52 @@ void Tasks::sendImage(void *arg){
         rt_mutex_acquire(&mutex_camera, TM_INFINITE);
         cam_open = camera->IsOpen();
         rt_mutex_release(&mutex_camera);
+        rt_mutex_acquire(&mutex_capture_arena, TM_INFINITE);
+        capt_arena = capture_arena;
+        rt_mutex_release(&mutex_capture_arena);
 
         if(cam_open){
             cout << "Periodic image sending" << endl << flush;
+            rt_mutex_acquire(&mutex_camera, TM_INFINITE);
             image = new Img(camera->Grab());
+            rt_mutex_release(&mutex_camera);
             rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
             monitor.Write(new MessageImg(MESSAGE_CAM_IMAGE, image));
             rt_mutex_release(&mutex_monitor);
 
+            if(capt_arena){
+                *arena_loc = image->SearchArena();
+                if(arena_loc == NULL){
+                    rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+                    monitor.Write(new Message(MESSAGE_ANSWER_NACK));
+                    rt_mutex_release(&mutex_monitor);
+                }
+            } else {
+                image->DrawArena(*arena_loc);
+                rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+                monitor.Write(new MessageImg(MESSAGE_CAM_IMAGE, image));
+                rt_mutex_release(&mutex_monitor);
+                rt_sem_p(&sem_arena, TM_INFINITE);
+                rt_mutex_acquire(&mutex_accept_arena, TM_INFINITE);
+                valid_arena = accept_arena;
+                rt_mutex_release(&mutex_accept_arena);
+
+                rt_mutex_acquire(&mutex_arena, TM_INFINITE);
+                if(!valid_arena){
+                    arena = NULL;
+                }else{
+                    arena = arena_loc;
+                }
+                rt_mutex_release(&mutex_arena);
+
+                rt_mutex_acquire(&mutex_capture_arena, TM_INFINITE);
+                capture_arena = false;
+                rt_mutex_release(&mutex_capture_arena);
+                free(arena_loc);
+            }
+
             free(image);
-        }
+        } 
     }
 }
 

@@ -67,12 +67,14 @@ private:
     ComMonitor monitor;
     ComRobot robot;
     Camera *camera  = new Camera(1, FPS);
-    //Camera camera;
+    Arena *arena;
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     bool watchdog = false;
     bool battery = false;
     bool open_camera = false;
+    bool capture_arena = false; // when user asks for capturing the arena
+    bool accept_arena = false; // when user accepts the arena borders
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -98,6 +100,9 @@ private:
     RT_MUTEX mutex_watchdog;
     RT_MUTEX mutex_battery;
     RT_MUTEX mutex_camera;
+    RT_MUTEX mutex_arena;
+    RT_MUTEX mutex_capture_arena;
+    RT_MUTEX mutex_accept_arena;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -107,6 +112,7 @@ private:
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
     RT_SEM sem_camera;
+    RT_SEM sem_arena;
 
     /**********************************************************************/
     /* Message queues                                                     */
