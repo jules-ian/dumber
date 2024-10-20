@@ -73,6 +73,10 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_mutex_create(&mutex_watchdog, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Mutexes created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -260,11 +264,23 @@ void Tasks::ReceiveFromMonTask(void *arg) {
         cout << "Rcv <= " << msgRcv->ToString() << endl << flush;
 
         if (msgRcv->CompareID(MESSAGE_MONITOR_LOST)) {
+            cout << "Connection lost between Supervisor and Monitor" << endl << flush; // Fonctionnalite 5
+            monitor.Close();
+            robot.Close();
+            // TODO: finish Fonc 6
             delete(msgRcv);
             exit(-1);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_COM_OPEN)) {
-            rt_sem_v(&sem_openComRobot);
+            rt_sem_v(&sem_openComRobot); // Libère le (sémaphore de) démarrage du robot
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD)) {
+            rt_mutex_acquire(&mutex_watchdog, TM_INFINITE);
+            watchdog = false;
+            rt_mutex_release(&mutex_watchdog);
+            rt_sem_v(&sem_startRobot);
+        } else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITH_WD)) {
+            rt_mutex_acquire(&mutex_watchdog, TM_INFINITE);
+            watchdog = true;
+            rt_mutex_release(&mutex_watchdog);
             rt_sem_v(&sem_startRobot);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) ||
@@ -305,7 +321,7 @@ void Tasks::OpenComRobot(void *arg) {
 
         Message * msgSend;
         if (status < 0) {
-            msgSend = new Message(MESSAGE_ANSWER_NACK);
+            msgSend = new Message(MESSAGE_ANSWER_NACK); // Message d'erreur
         } else {
             msgSend = new Message(MESSAGE_ANSWER_ACK);
         }
@@ -317,6 +333,7 @@ void Tasks::OpenComRobot(void *arg) {
  * @brief Thread starting the communication with the robot.
  */
 void Tasks::StartRobotTask(void *arg) {
+    bool wd;
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
@@ -328,9 +345,19 @@ void Tasks::StartRobotTask(void *arg) {
 
         Message * msgSend;
         rt_sem_p(&sem_startRobot, TM_INFINITE);
-        cout << "Start robot without watchdog (";
+
+        rt_mutex_acquire(&mutex_watchdog, TM_INFINITE);
+        wd = watchdog;
+        rt_mutex_release(&mutex_watchdog);
         rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-        msgSend = robot.Write(robot.StartWithoutWD());
+
+        if(wd){
+            msgSend = robot.Write(robot.StartWithWD());
+            cout << "Start Robot with watchdog (";
+        }else{
+            msgSend = robot.Write(robot.StartWithoutWD());
+            cout << "Start Robot without watchdog (";
+        }
         rt_mutex_release(&mutex_robot);
         cout << msgSend->GetID();
         cout << ")" << endl;
@@ -352,6 +379,7 @@ void Tasks::StartRobotTask(void *arg) {
 void Tasks::MoveTask(void *arg) {
     int rs;
     int cpMove;
+    int counter = 0;
     
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
@@ -376,8 +404,21 @@ void Tasks::MoveTask(void *arg) {
             cout << " move: " << cpMove;
             
             rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-            robot.Write(new Message((MessageID)cpMove));
+            if((robot.Write(new Message((MessageID)cpMove))->CompareID(MESSAGE_ANSWER_ROBOT_TIMEOUT))){
+                counter++;
+            }else{
+                counter = 0;
+            }
             rt_mutex_release(&mutex_robot);
+            if(counter >= 3){
+                cout << "Communication lost between Supervisor and Robot " << endl << flush;
+                rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+                robot.Close(); // close_communication_robot
+                rt_mutex_release(&mutex_robot);
+                rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
+                robotStarted = 0; // Reset -> to initial state
+                rt_mutex_release(&mutex_robotStarted);
+            }
         }
         cout << endl << flush;
     }
@@ -414,4 +455,3 @@ Message *Tasks::ReadInQueue(RT_QUEUE *queue) {
 
     return msg;
 }
-

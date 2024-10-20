@@ -64,8 +64,10 @@ private:
     /**********************************************************************/
     ComMonitor monitor;
     ComRobot robot;
+    //Camera camera;
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
+    bool watchdog;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -84,6 +86,7 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
+    RT_MUTEX mutex_watchdog;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -152,4 +155,3 @@ private:
 };
 
 #endif // __TASKS_H__ 
-
