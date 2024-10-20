@@ -68,6 +68,7 @@ private:
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     bool watchdog;
+    bool battery;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -78,6 +79,8 @@ private:
     RT_TASK th_openComRobot;
     RT_TASK th_startRobot;
     RT_TASK th_move;
+    RT_TASK th_reloadWD;
+    RT_TASK th_updateBattery;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -87,6 +90,7 @@ private:
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
     RT_MUTEX mutex_watchdog;
+    RT_MUTEX mutex_battery;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -134,6 +138,16 @@ private:
      * @brief Thread handling control of the robot.
      */
     void MoveTask(void *arg);
+
+    /**
+     * @brief Thread handling reload of the watchdog.
+     */
+    void ReloadWD(void *arg);
+
+    /**
+    * @brief Thread updating the battery level.
+    */
+    void updateBattery(void *arg);
     
     /**********************************************************************/
     /* Queue services                                                     */
@@ -155,4 +169,3 @@ private:
 };
 
 #endif // __TASKS_H__ 
-

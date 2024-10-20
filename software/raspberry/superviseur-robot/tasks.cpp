@@ -26,6 +26,11 @@
 #define PRIORITY_TRECEIVEFROMMON 25
 #define PRIORITY_TSTARTROBOT 20
 #define PRIORITY_TCAMERA 21
+#define PRIORITY_RELOADWD 25 // TODO: ADJUST THIS PRIORITY
+
+/*                   --s-ms-us-ns */
+RTIME reloadWD_period_ns = 1000000000llu ;
+RTIME updateBattery_period_ns = 500000000llu ;
 
 /*
  * Some remarks:
@@ -74,6 +79,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_mutex_create(&mutex_watchdog, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_mutex_create(&mutex_battery, NULL)) {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -127,7 +136,28 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_task_create(&th_reloadWD, "th_reloadWD", 0, PRIORITY_RELOADWD, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_updateBattery, "th_updateBattery", 0, PRIORITY_RELOADWD, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Tasks created successfully" << endl << flush;
+
+    /**************************************************************************************/
+    /* Tasks configuration                                                                */
+    /**************************************************************************************/
+
+    if (err = rt_task_set_periodic(&th_reloadWD, TM_NOW, rt_timer_ns2ticks(reloadWD_period_ns))) {
+        cerr << "Error task set periodic: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_set_periodic(&th_updateBattery, TM_NOW, rt_timer_ns2ticks(updateBattery_period_ns))) {
+        cerr << "Error task set periodic: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
 
     /**************************************************************************************/
     /* Message queues creation                                                            */
@@ -168,6 +198,10 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_move, (void(*)(void*)) & Tasks::MoveTask, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_reloadWD, (void(*)(void*)) & Tasks::ReloadWD, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -282,6 +316,10 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             watchdog = true;
             rt_mutex_release(&mutex_watchdog);
             rt_sem_v(&sem_startRobot);
+        } else if (msgRcv->CompareID(MESSAGE_ROBOT_BATTERY_GET)) {
+            rt_mutex_acquire(&mutex_battery, TM_INFINITE);
+            battery = true;
+            rt_mutex_release(&mutex_battery);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_LEFT) ||
@@ -365,11 +403,17 @@ void Tasks::StartRobotTask(void *arg) {
         cout << "Movement answer: " << msgSend->ToString() << endl << flush;
         WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
 
+        rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
         if (msgSend->GetID() == MESSAGE_ANSWER_ACK) {
+            monitor.Write(new Message(MESSAGE_ANSWER_ACK));
             rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
             robotStarted = 1;
             rt_mutex_release(&mutex_robotStarted);
+        } else {
+            monitor.Write(new Message(MESSAGE_ANSWER_NACK));
+            cout << "Robot not started" << endl << flush;
         }
+        rt_mutex_release(&mutex_monitor);
     }
 }
 
@@ -424,6 +468,53 @@ void Tasks::MoveTask(void *arg) {
     }
 }
 
+
+/**
+* @brief Thread handling reload of the watchdog.
+*/
+void Tasks::ReloadWD(void *arg){
+    int err;
+    while(1){
+        err = rt_task_wait_period(NULL) ;
+        if (err) {
+            printf ("error on wait_period, %s \n ", strerror(-err));
+            break ;
+        }
+        rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+        robot.Write(new Message(MESSAGE_ROBOT_RELOAD_WD));
+        rt_mutex_release(&mutex_robot);
+    }
+}
+
+/**
+* @brief Thread updating the battery level.
+*/
+void Tasks::updateBattery(void *arg){
+    int err;
+    BatteryLevel batteryLvl;
+    bool getBattery;
+    MessageBattery *msg;
+    while(1){
+        err = rt_task_wait_period(NULL) ;
+        if (err) {
+            printf ("error on wait_period, %s \n ", strerror(-err));
+            break ;
+        }
+        rt_mutex_acquire(&mutex_battery, TM_INFINITE);
+        getBattery = battery;
+        rt_mutex_release(&mutex_battery);
+        if(battery){
+            rt_mutex_acquire(&mutex_robot, TM_INFINITE); 
+            msg = (MessageBattery*) robot.Write(new Message(MESSAGE_ROBOT_BATTERY_GET));
+            rt_mutex_release(&mutex_robot);
+            batteryLvl = msg->GetLevel();
+            rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+            monitor.Write(new MessageBattery(MESSAGE_ROBOT_BATTERY_LEVEL, batteryLvl));
+            rt_mutex_release(&mutex_monitor);
+        }
+    }
+}
+
 /**
  * Write a message in a given queue
  * @param queue Queue identifier
@@ -455,4 +546,3 @@ Message *Tasks::ReadInQueue(RT_QUEUE *queue) {
 
     return msg;
 }
-
