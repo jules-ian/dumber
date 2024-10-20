@@ -34,6 +34,8 @@
 #include "camera.h"
 #include "img.h"
 
+#define FPS 10
+
 using namespace std;
 
 class Tasks {
@@ -64,11 +66,13 @@ private:
     /**********************************************************************/
     ComMonitor monitor;
     ComRobot robot;
+    Camera *camera  = new Camera(1, FPS);
     //Camera camera;
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
-    bool watchdog;
+    bool watchdog = false;
     bool battery = false;
+    bool open_camera = false;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -81,6 +85,8 @@ private:
     RT_TASK th_move;
     RT_TASK th_reloadWD;
     RT_TASK th_updateBattery;
+    RT_TASK th_openCamera;
+    RT_TASK th_sendImage;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -91,6 +97,7 @@ private:
     RT_MUTEX mutex_move;
     RT_MUTEX mutex_watchdog;
     RT_MUTEX mutex_battery;
+    RT_MUTEX mutex_camera;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -99,6 +106,7 @@ private:
     RT_SEM sem_openComRobot;
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
+    RT_SEM sem_camera;
 
     /**********************************************************************/
     /* Message queues                                                     */
@@ -148,6 +156,16 @@ private:
     * @brief Thread updating the battery level.
     */
     void updateBattery(void *arg);
+
+    /**
+    * @brief Thread opening the camera.
+    */
+    void openCamera(void *arg);
+
+    /**
+    * @brief Thread sending an image to the monitor.
+    */
+    void sendImage(void *arg);
     
     /**********************************************************************/
     /* Queue services                                                     */

@@ -28,9 +28,10 @@
 #define PRIORITY_TCAMERA 21
 #define PRIORITY_RELOADWD 25 // TODO: ADJUST THIS PRIORITY
 
-/*                   --s-ms-us-ns */
-RTIME reloadWD_period_ns = 1000000000llu ;
-RTIME updateBattery_period_ns = 500000000llu ;
+/*                            --s-ms-us-ns */
+RTIME reloadWD_period_ns =      1000000000llu ;
+RTIME updateBattery_period_ns =  500000000llu ;
+RTIME captureImage_period_ns =   100000000llu ;
 
 /*
  * Some remarks:
@@ -86,6 +87,10 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_mutex_create(&mutex_camera, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Mutexes created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -104,6 +109,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_sem_create(&sem_startRobot, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_sem_create(&sem_camera, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -144,6 +153,14 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_task_create(&th_openCamera, "th_openCamera", 0, PRIORITY_RELOADWD, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_sendImage, "th_sendImage", 0, PRIORITY_RELOADWD, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Tasks created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -155,6 +172,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_set_periodic(&th_updateBattery, TM_NOW, rt_timer_ns2ticks(updateBattery_period_ns))) {
+        cerr << "Error task set periodic: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_set_periodic(&th_sendImage, TM_NOW, rt_timer_ns2ticks(captureImage_period_ns))) {
         cerr << "Error task set periodic: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -206,6 +227,14 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_updateBattery, (void(*)(void*)) & Tasks::updateBattery, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_openCamera, (void(*)(void*)) & Tasks::openCamera, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_sendImage, (void(*)(void*)) & Tasks::sendImage, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -324,6 +353,16 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             rt_mutex_acquire(&mutex_battery, TM_INFINITE);
             battery = true;
             rt_mutex_release(&mutex_battery);
+        } else if (msgRcv->CompareID(MESSAGE_CAM_OPEN)) {
+            rt_mutex_acquire(&mutex_camera, TM_INFINITE);
+            open_camera = true;
+            rt_mutex_release(&mutex_camera);
+            rt_sem_v(&sem_camera);
+        } else if (msgRcv->CompareID(MESSAGE_CAM_CLOSE)) {
+            rt_mutex_acquire(&mutex_camera, TM_INFINITE);
+            open_camera = false;
+            rt_mutex_release(&mutex_camera);
+            rt_sem_v(&sem_camera);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_LEFT) ||
@@ -526,6 +565,68 @@ void Tasks::updateBattery(void *arg){
             rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
             monitor.Write(new MessageBattery(MESSAGE_ROBOT_BATTERY_LEVEL, batteryLvl));
             rt_mutex_release(&mutex_monitor);
+        }
+    }
+}
+
+/**
+* @brief Thread opening the camera.
+*/
+void Tasks::openCamera(void *arg){
+
+    bool openCam = false;
+    bool is_open = false;
+    Message * msgSend;
+
+    cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+
+    
+
+    while(1){
+        rt_sem_p(&sem_camera, TM_INFINITE);
+        rt_mutex_acquire(&mutex_camera, TM_INFINITE);
+        openCam = open_camera;
+        is_open = camera->IsOpen();
+
+        if(openCam && !is_open){
+            if(!camera->Open()){ // Opening camera Failed
+                cout << "Failed to open camera" << endl << flush;
+            }
+        }else if(!openCam && is_open){
+            camera->Close();
+            cout << "Camera succesfully closed" << endl << flush;
+        }
+        rt_mutex_release(&mutex_camera);  
+    }
+}
+
+/**
+* @brief Thread sending an image to the monitor.
+*/
+void Tasks::sendImage(void *arg){
+    Img* image;
+    int err;
+    bool cam_open = false;
+
+
+    cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+
+    while(1){
+        err = rt_task_wait_period(NULL) ;
+        rt_mutex_acquire(&mutex_camera, TM_INFINITE);
+        cam_open = camera->IsOpen();
+        rt_mutex_release(&mutex_camera);
+
+        if(cam_open){
+            cout << "Periodic image sending" << endl << flush;
+            image = new Img(camera->Grab());
+            rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+            monitor.Write(new MessageImg(MESSAGE_CAM_IMAGE, image));
+            rt_mutex_release(&mutex_monitor);
+
+            free(image);
         }
     }
 }
