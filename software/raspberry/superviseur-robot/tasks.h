@@ -68,7 +68,7 @@ private:
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     bool watchdog;
-    bool battery;
+    bool battery = false;
     
     /**********************************************************************/
     /* Tasks                                                              */

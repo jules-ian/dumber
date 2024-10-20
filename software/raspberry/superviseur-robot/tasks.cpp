@@ -205,6 +205,10 @@ void Tasks::Run() {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_task_start(&th_updateBattery, (void(*)(void*)) & Tasks::updateBattery, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
 
     cout << "Tasks launched" << endl << flush;
 }
@@ -474,7 +478,12 @@ void Tasks::MoveTask(void *arg) {
 */
 void Tasks::ReloadWD(void *arg){
     int err;
+
+    cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+
     while(1){
+        cout << "Periodic watchdog reload" << endl << flush;
         err = rt_task_wait_period(NULL) ;
         if (err) {
             printf ("error on wait_period, %s \n ", strerror(-err));
@@ -492,9 +501,14 @@ void Tasks::ReloadWD(void *arg){
 void Tasks::updateBattery(void *arg){
     int err;
     BatteryLevel batteryLvl;
-    bool getBattery;
+    bool getBattery = false;
     MessageBattery *msg;
+
+    cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+
     while(1){
+        cout << "Periodic battery update" << endl << flush;
         err = rt_task_wait_period(NULL) ;
         if (err) {
             printf ("error on wait_period, %s \n ", strerror(-err));
@@ -503,7 +517,8 @@ void Tasks::updateBattery(void *arg){
         rt_mutex_acquire(&mutex_battery, TM_INFINITE);
         getBattery = battery;
         rt_mutex_release(&mutex_battery);
-        if(battery){
+        if(getBattery){
+            cout << "battery lvl asked" << endl << flush;
             rt_mutex_acquire(&mutex_robot, TM_INFINITE); 
             msg = (MessageBattery*) robot.Write(new Message(MESSAGE_ROBOT_BATTERY_GET));
             rt_mutex_release(&mutex_robot);
