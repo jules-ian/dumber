@@ -75,6 +75,7 @@ private:
     bool open_camera = false;
     bool capture_arena = false; // when user asks for capturing the arena
     bool accept_arena = false; // when user accepts the arena borders
+    bool compute = false; // when user ask for finding the robot
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -103,6 +104,7 @@ private:
     RT_MUTEX mutex_arena;
     RT_MUTEX mutex_capture_arena;
     RT_MUTEX mutex_accept_arena;
+    RT_MUTEX mutex_compute;
 
     /**********************************************************************/
     /* Semaphores                                                         */

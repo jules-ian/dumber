@@ -103,6 +103,10 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_mutex_create(&mutex_compute, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Mutexes created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -393,6 +397,14 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             accept_arena = false;
             rt_mutex_release(&mutex_accept_arena);
             rt_sem_v(&sem_arena);
+        } else if (msgRcv->CompareID(MESSAGE_CAM_POSITION_COMPUTE_START)) {
+            rt_mutex_acquire(&mutex_compute, TM_INFINITE);
+            compute = true;
+            rt_mutex_release(&mutex_compute);
+        } else if (msgRcv->CompareID(MESSAGE_CAM_POSITION_COMPUTE_STOP)) {
+            rt_mutex_acquire(&mutex_compute, TM_INFINITE);
+            compute = false;
+            rt_mutex_release(&mutex_compute);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_LEFT) ||
@@ -641,13 +653,14 @@ void Tasks::sendImage(void *arg){
     bool cam_open = false;
     bool capt_arena = false;
     bool valid_arena = false;
+    bool compute_robot = false;
 
 
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
     rt_sem_p(&sem_barrier, TM_INFINITE);
 
     while(1){
-        err = rt_task_wait_period(NULL) ;
+        err = rt_task_wait_period(NULL);
         rt_mutex_acquire(&mutex_camera, TM_INFINITE);
         cam_open = camera->IsOpen();
         rt_mutex_release(&mutex_camera);
@@ -655,7 +668,7 @@ void Tasks::sendImage(void *arg){
         capt_arena = capture_arena;
         rt_mutex_release(&mutex_capture_arena);
 
-        if(cam_open){
+        if(cam_open){ //TODO ? separer en plusieurs tasks
             cout << "Periodic image sending" << endl << flush;
             rt_mutex_acquire(&mutex_camera, TM_INFINITE);
             image = new Img(camera->Grab());
@@ -663,6 +676,9 @@ void Tasks::sendImage(void *arg){
             rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
             monitor.Write(new MessageImg(MESSAGE_CAM_IMAGE, image));
             rt_mutex_release(&mutex_monitor);
+            rt_mutex_acquire(&mutex_compute, TM_INFINITE);
+            compute_robot = compute;
+            rt_mutex_release(&mutex_compute);
 
             if(capt_arena){
                 *arena_loc = image->SearchArena();
@@ -696,6 +712,24 @@ void Tasks::sendImage(void *arg){
                 capture_arena = false;
                 rt_mutex_release(&mutex_capture_arena);
             }
+
+            if(compute_robot && arena != NULL){
+                std::list<Position> position_list = image->SearchRobot(*arena);
+                Position *position = new Position();
+                if(!position_list.empty()){
+                    *position = position_list.front();
+                    image->DrawRobot(*position);
+                }
+                    rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+                    monitor.Write(new MessagePosition(MESSAGE_CAM_POSITION, *position));
+                    rt_mutex_release(&mutex_monitor);
+
+                    rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+                    monitor.Write(new MessageImg(MESSAGE_CAM_IMAGE, image));
+                    rt_mutex_release(&mutex_monitor);
+            }
+
+
             free(image);
         } 
     }
