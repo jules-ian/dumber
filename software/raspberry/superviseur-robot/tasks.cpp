@@ -384,9 +384,9 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             capture_arena = true;
             rt_mutex_release(&mutex_capture_arena);
         } else if (msgRcv->CompareID(MESSAGE_CAM_ARENA_CONFIRM)) {
-            rt_mutex_acquire(&mutex_capture_arena, TM_INFINITE);
+            rt_mutex_acquire(&mutex_accept_arena, TM_INFINITE);
             accept_arena = true;
-            rt_mutex_release(&mutex_capture_arena);
+            rt_mutex_release(&mutex_accept_arena);
             rt_sem_v(&sem_arena);
         } else if (msgRcv->CompareID(MESSAGE_CAM_ARENA_INFIRM)) {
             rt_mutex_acquire(&mutex_accept_arena, TM_INFINITE);
@@ -666,35 +666,36 @@ void Tasks::sendImage(void *arg){
 
             if(capt_arena){
                 *arena_loc = image->SearchArena();
-                if(arena_loc == NULL){
+                if(arena_loc->IsEmpty()){
+                    cout << "[INFO] No Arena found" << endl << flush;
                     rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
                     monitor.Write(new Message(MESSAGE_ANSWER_NACK));
                     rt_mutex_release(&mutex_monitor);
-                }
-            } else {
-                image->DrawArena(*arena_loc);
-                rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
-                monitor.Write(new MessageImg(MESSAGE_CAM_IMAGE, image));
-                rt_mutex_release(&mutex_monitor);
-                rt_sem_p(&sem_arena, TM_INFINITE);
-                rt_mutex_acquire(&mutex_accept_arena, TM_INFINITE);
-                valid_arena = accept_arena;
-                rt_mutex_release(&mutex_accept_arena);
+                } else {
+                    cout << "[INFO] Arena found" << endl << flush;
+                    image->DrawArena(*arena_loc);
+                    rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+                    monitor.Write(new MessageImg(MESSAGE_CAM_IMAGE, image));
+                    rt_mutex_release(&mutex_monitor);
+                    rt_sem_p(&sem_arena, TM_INFINITE);
+                    rt_mutex_acquire(&mutex_accept_arena, TM_INFINITE);
+                    valid_arena = accept_arena;
+                    rt_mutex_release(&mutex_accept_arena);
 
-                rt_mutex_acquire(&mutex_arena, TM_INFINITE);
-                if(!valid_arena){
-                    arena = NULL;
-                }else{
-                    arena = arena_loc;
-                }
-                rt_mutex_release(&mutex_arena);
+                    rt_mutex_acquire(&mutex_arena, TM_INFINITE);
+                    if(!valid_arena){
+                        arena = NULL;
+                    }else{
+                        arena = arena_loc;
+                    }
+                    rt_mutex_release(&mutex_arena);
 
+                    //free(arena_loc);
+                }
                 rt_mutex_acquire(&mutex_capture_arena, TM_INFINITE);
                 capture_arena = false;
                 rt_mutex_release(&mutex_capture_arena);
-                free(arena_loc);
             }
-
             free(image);
         } 
     }
