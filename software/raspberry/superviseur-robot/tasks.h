@@ -70,12 +70,14 @@ private:
     Arena *arena;
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
+    int lost_messages_counter = 0;
     bool watchdog = false;
     bool battery = false;
     bool open_camera = false;
     bool capture_arena = false; // when user asks for capturing the arena
     bool accept_arena = false; // when user accepts the arena borders
     bool compute = false; // when user ask for finding the robot
+    bool server_open = false; 
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -100,11 +102,13 @@ private:
     RT_MUTEX mutex_move;
     RT_MUTEX mutex_watchdog;
     RT_MUTEX mutex_battery;
+    RT_MUTEX mutex_counter;
     RT_MUTEX mutex_camera;
     RT_MUTEX mutex_arena;
     RT_MUTEX mutex_capture_arena;
     RT_MUTEX mutex_accept_arena;
     RT_MUTEX mutex_compute;
+    RT_MUTEX mutex_server;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -113,8 +117,10 @@ private:
     RT_SEM sem_openComRobot;
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
+    RT_SEM sem_watchdog; 
     RT_SEM sem_camera;
     RT_SEM sem_arena;
+    RT_SEM sem_restart_server;
 
     /**********************************************************************/
     /* Message queues                                                     */
