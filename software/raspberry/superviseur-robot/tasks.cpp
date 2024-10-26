@@ -282,8 +282,12 @@ void Tasks::Run() {
  * @brief Arrêt des tâches
  */
 void Tasks::Stop() {
+    rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
     monitor.Close();
+    rt_mutex_release(&mutex_monitor);
+    rt_mutex_acquire(&mutex_robot, TM_INFINITE);
     robot.Close();
+    rt_mutex_release(&mutex_robot);
 }
 
 /**
@@ -317,10 +321,8 @@ void Tasks::ServerTask(void *arg) {
         if (status < 0) throw std::runtime_error {
             "Unable to start server on port " + std::to_string(SERVER_PORT)
         };
-       
-        rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+
         monitor.AcceptClient(); // Wait the monitor client
-        rt_mutex_release(&mutex_monitor);
         cout << "Rock'n'Roll baby, client accepted!" << endl << flush;
         rt_mutex_acquire(&mutex_server, TM_INFINITE);
         server_open = true;
@@ -384,7 +386,7 @@ void Tasks::ReceiveFromMonTask(void *arg) {
     /**************************************************************************************/
     /* The task receiveFromMon starts here                                                */
     /**************************************************************************************/
-    rt_sem_p(&sem_serverOk, TM_INFINITE);
+    //rt_sem_p(&sem_serverOk, TM_INFINITE);
     cout << "Received message from monitor activated" << endl << flush;
 
     while (1) {
@@ -414,9 +416,44 @@ void Tasks::ReceiveFromMonTask(void *arg) {
                 rt_mutex_acquire(&mutex_camera, TM_INFINITE);
                 camera->Close();
                 rt_mutex_release(&mutex_camera);
+
+                rt_mutex_acquire(&mutex_counter, TM_INFINITE);
+                lost_messages_counter = 0;
+                rt_mutex_release(&mutex_counter);
+
+                rt_mutex_acquire(&mutex_watchdog, TM_INFINITE);
+                watchdog = false;
+                rt_mutex_release(&mutex_watchdog);
+
+                rt_mutex_acquire(&mutex_battery, TM_INFINITE);
+                battery = false;
+                rt_mutex_release(&mutex_battery);
+                
+                rt_mutex_acquire(&mutex_camera, TM_INFINITE);
+                open_camera = false;
+                rt_mutex_release(&mutex_camera);
+                
+                rt_mutex_acquire(&mutex_capture_arena, TM_INFINITE);
+                capture_arena = false;
+                rt_mutex_release(&mutex_capture_arena);
+               
+                rt_mutex_acquire(&mutex_accept_arena, TM_INFINITE);
+                accept_arena = false;
+                rt_mutex_release(&mutex_accept_arena);
+
+                rt_mutex_acquire(&mutex_compute, TM_INFINITE);
+                compute = false;
+                rt_mutex_release(&mutex_compute);
+
+                rt_mutex_acquire(&mutex_server, TM_INFINITE);
+                server_open = false;
+                rt_mutex_release(&mutex_server);
+
+
+                
                 // TODO: finish Fonc 6
                 rt_sem_v(&sem_restart_server);
-                delete(msgRcv);
+                //delete(msgRcv);
             } else if (msgRcv->CompareID(MESSAGE_ROBOT_COM_OPEN)) {
                 rt_sem_v(&sem_openComRobot); // Libère le (sémaphore de) démarrage du robot
             } else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD)) {
@@ -475,7 +512,7 @@ void Tasks::ReceiveFromMonTask(void *arg) {
                 move = msgRcv->GetID();
                 rt_mutex_release(&mutex_move);
             }
-            delete(msgRcv); // mus be deleted manually, no consumer
+            delete(msgRcv); // must be deleted manually, no consumer
         }
     }
 }
@@ -731,6 +768,8 @@ void Tasks::openCamera(void *arg){
         if(openCam && !is_open){
             if(!camera->Open()){ // Opening camera Failed
                 cout << "Failed to open camera" << endl << flush;
+            }else{
+                cout << "Successfully opened Camera" << endl << flush;
             }
         }else if(!openCam && is_open){
             camera->Close();
@@ -767,7 +806,7 @@ void Tasks::sendImage(void *arg){
         rt_mutex_release(&mutex_capture_arena);
 
         if(cam_open){
-            //cout << "Periodic image sending" << endl << flush;
+            cout << "Periodic image sending" << endl << flush;
             rt_mutex_acquire(&mutex_camera, TM_INFINITE);
             image = new Img(camera->Grab());
             rt_mutex_release(&mutex_camera);
@@ -830,7 +869,6 @@ void Tasks::sendImage(void *arg){
             monitor.Write(new MessageImg(MESSAGE_CAM_IMAGE, image));
             rt_mutex_release(&mutex_monitor);
 
-            //free(image);
         } 
     }
 }
