@@ -574,7 +574,7 @@ void Tasks::StartRobotTask(void *arg) {
 
         if(wd){
             msgSend = robot.Write(robot.StartWithWD());
-            rt_sem_v(&sem_watchdog); // synchronize with reload of WD
+            //rt_sem_v(&sem_watchdog); // synchronize with reload of WD
             cout << "Start Robot with watchdog (";
         }else{
             msgSend = robot.Write(robot.StartWithoutWD());
@@ -668,7 +668,7 @@ void Tasks::ReloadWD(void *arg){
 
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
     rt_sem_p(&sem_barrier, TM_INFINITE);
-    rt_sem_p(&sem_watchdog, TM_INFINITE); // synchronize with start of WD
+    //rt_sem_p(&sem_watchdog, TM_INFINITE); // synchronize with start of WD
 
     while(1){
         cout << "Periodic watchdog reload" << endl << flush;
@@ -851,6 +851,8 @@ void Tasks::sendImage(void *arg){
                 rt_mutex_release(&mutex_capture_arena);
             } else if(accept_arena_loc){
                     image->DrawArena(*arena_loc);
+            } else if(!accept_arena_loc){
+                arena = NULL;
             }
             /** Gestion image Robot */
             if(compute_robot && arena != NULL){
